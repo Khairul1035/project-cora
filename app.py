@@ -6,7 +6,7 @@ import pydeck as pdk
 from datetime import datetime, timezone
 
 # ==============================================================================
-# PROJECT CORA V2 — Maritime Crisis Decision Simulator
+# PROJECT CORA V2.2 — Maritime Crisis Decision Simulator
 # ============================================================================
 
 st.set_page_config(
@@ -42,6 +42,7 @@ st.markdown(
 NODE_CONFIG = {
     "Red Sea / Bab al-Mandab": {
         "gdelt_keyword": '"Bab al-Mandab" (attack OR crisis OR shipping OR vessel OR missile)',
+        "gdelt_fallback": '"Bab al-Mandab" shipping',
         "wolfram_query": "distance Suez Canal Bab el Mandeb",
         "spatial_reference": "≈ 2,210 km",
         "spatial_description": "Approximate Suez Canal–Bab al-Mandab route baseline",
@@ -57,6 +58,7 @@ NODE_CONFIG = {
     },
     "Strait of Hormuz": {
         "gdelt_keyword": '"Strait of Hormuz" (military OR tanker OR shipping OR attack OR seizure)',
+        "gdelt_fallback": '"Strait of Hormuz" shipping',
         "wolfram_query": "Strait of Hormuz width",
         "spatial_reference": "≈ 39 km",
         "spatial_description": "Approximate width of the Strait of Hormuz at its narrowest area",
@@ -72,6 +74,7 @@ NODE_CONFIG = {
     },
     "Malacca Strait": {
         "gdelt_keyword": '"Strait of Malacca" (piracy OR shipping OR vessel OR disruption OR collision)',
+        "gdelt_fallback": '"Strait of Malacca" shipping',
         "wolfram_query": "Strait of Malacca length",
         "spatial_reference": "≈ 800 km",
         "spatial_description": "Approximate length of the Strait of Malacca",
@@ -106,36 +109,67 @@ DEFAULT_SOURCE = "https://www.gdeltproject.org/"
 # 2. HELPERS
 # ==============================================================================
 
-@st.cache_data(ttl=900, show_spinner=False)
-def fetch_gdelt_latest(keyword: str):
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_gdelt_latest(primary_keyword: str, fallback_keyword: str):
+    """
+    Best-effort GDELT retrieval.
+
+    Returns a dict with:
+      ok, headline, url, error, query_used, window
+    """
     url = "https://api.gdeltproject.org/api/v2/doc/doc"
-    params = {
-        "query": keyword,
-        "mode": "artlist",
-        "format": "json",
-        "maxrecords": 10,
-        "timespan": "15min",
-        "sort": "datedesc",
+    headers = {"User-Agent": "Project-CORA/2.2 research prototype"}
+
+    attempts = [
+        (primary_keyword, "15min", 5),
+        (fallback_keyword, "1h", 6),
+    ]
+
+    last_error = None
+
+    for query, window, timeout_s in attempts:
+        params = {
+            "query": query,
+            "mode": "artlist",
+            "format": "json",
+            "maxrecords": 5,
+            "timespan": window,
+            "sort": "datedesc",
+        }
+
+        try:
+            response = requests.get(
+                url,
+                params=params,
+                headers=headers,
+                timeout=timeout_s,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            articles = payload.get("articles", [])
+
+            if articles:
+                article = articles[0]
+                return {
+                    "ok": True,
+                    "headline": article.get("title") or "Untitled GDELT result",
+                    "url": article.get("url") or DEFAULT_SOURCE,
+                    "error": None,
+                    "query_used": query,
+                    "window": window,
+                }
+
+        except (requests.RequestException, ValueError, TypeError) as exc:
+            last_error = str(exc)
+
+    return {
+        "ok": False,
+        "headline": None,
+        "url": None,
+        "error": last_error or "No matching GDELT article was returned.",
+        "query_used": None,
+        "window": None,
     }
-    headers = {"User-Agent": "Project-CORA/2.1 research prototype"}
-
-    try:
-        response = requests.get(url, params=params, headers=headers, timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        payload = response.json()
-        articles = payload.get("articles", [])
-
-        if not articles:
-            return DEFAULT_HEADLINE, DEFAULT_SOURCE, None
-
-        article = articles[0]
-        return (
-            article.get("title") or DEFAULT_HEADLINE,
-            article.get("url") or DEFAULT_SOURCE,
-            None,
-        )
-    except (requests.RequestException, ValueError, TypeError) as exc:
-        return DEFAULT_HEADLINE, DEFAULT_SOURCE, f"GDELT request failed: {exc}"
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -280,6 +314,53 @@ with st.sidebar:
     port_disruption = st.checkbox("Port / channel disruption", value=False)
     insurer_confirmation = st.checkbox("Insurance / broker confirmation", value=False)
 
+    st.markdown("### Intelligence source mode")
+    intelligence_mode = st.selectbox(
+        "Primary intelligence mode",
+        [
+            "Hybrid: GDELT + analyst",
+            "Analyst only",
+            "GDELT only",
+        ],
+        index=0,
+        help="Hybrid uses live/cached GDELT when available and keeps analyst judgement explicit.",
+    )
+
+    manual_event = st.selectbox(
+        "Analyst-observed event",
+        [
+            "No additional event",
+            "Security incident",
+            "Navigation interference",
+            "Port disruption",
+            "Vessel detention / seizure",
+            "Cyber disruption",
+            "Other operational concern",
+        ],
+        index=0,
+    )
+
+    manual_event_severity = st.slider(
+        "Manual event severity",
+        min_value=0,
+        max_value=100,
+        value=50,
+        disabled=(manual_event == "No additional event"),
+        help="Severity of the analyst-entered event. This is an assumption, not a probability.",
+    )
+
+    manual_source_confidence = st.select_slider(
+        "Manual source confidence",
+        options=["Low", "Medium", "High"],
+        value="Medium",
+        disabled=(manual_event == "No additional event"),
+    )
+
+    manual_note = st.text_input(
+        "Analyst note (optional)",
+        placeholder="e.g., port authority notice, broker call, internal operations report",
+    )
+
     run = st.button("▶ Run / Refresh Scenario", use_container_width=True, type="primary")
 
     st.caption("Inputs recalculate automatically. The button is provided as an explicit control-room action.")
@@ -294,8 +375,52 @@ try:
 except Exception:
     WOLFRAM_APP_ID = ""
 
-headline, source_url, gdelt_error = fetch_gdelt_latest(cfg["gdelt_keyword"])
-headline_sentiment = polarity(headline)
+gdelt_result = fetch_gdelt_latest(
+    cfg["gdelt_keyword"],
+    cfg["gdelt_fallback"],
+)
+
+# Persist the last successful GDELT result for this browser session.
+if "last_good_gdelt" not in st.session_state:
+    st.session_state.last_good_gdelt = {}
+
+if gdelt_result["ok"]:
+    st.session_state.last_good_gdelt[current_node] = {
+        "headline": gdelt_result["headline"],
+        "url": gdelt_result["url"],
+        "captured_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "query_used": gdelt_result["query_used"],
+        "window": gdelt_result["window"],
+    }
+
+last_good = st.session_state.last_good_gdelt.get(current_node)
+
+if intelligence_mode == "Analyst only":
+    gdelt_state = "DISABLED"
+    headline = None
+    source_url = None
+    headline_sentiment = None
+    gdelt_age_note = "Live GDELT is disabled by analyst selection."
+elif gdelt_result["ok"]:
+    gdelt_state = "LIVE"
+    headline = gdelt_result["headline"]
+    source_url = gdelt_result["url"]
+    headline_sentiment = polarity(headline)
+    gdelt_age_note = f"Live result | window: {gdelt_result['window']}"
+elif last_good and intelligence_mode != "Analyst only":
+    gdelt_state = "LAST SUCCESS"
+    headline = last_good["headline"]
+    source_url = last_good["url"]
+    headline_sentiment = polarity(headline)
+    gdelt_age_note = f"Last successful session result captured {last_good['captured_utc']}"
+else:
+    gdelt_state = "UNKNOWN"
+    headline = None
+    source_url = None
+    headline_sentiment = None
+    gdelt_age_note = "No live or session-cached GDELT result is available."
+
+gdelt_error = gdelt_result["error"]
 
 # Geography is treated as a stable reference, not as a live dependency.
 # Wolfram is optional enrichment/validation only.
@@ -314,7 +439,21 @@ else:
 # ==============================================================================
 
 # Transparent prototype scoring, not a probability model.
-headline_component = max(0, -headline_sentiment) * 15
+# Missing GDELT data is UNKNOWN, not neutral.
+# Live results receive full heuristic weight; session-cached results receive half weight.
+if headline_sentiment is None or intelligence_mode == "Analyst only":
+    headline_component = 0.0
+elif gdelt_state == "LIVE":
+    headline_component = max(0, -headline_sentiment) * 15
+elif gdelt_state == "LAST SUCCESS":
+    headline_component = max(0, -headline_sentiment) * 7.5
+else:
+    headline_component = 0.0
+
+manual_confidence_weight = {"Low": 0.45, "Medium": 0.70, "High": 1.00}[manual_source_confidence]
+manual_event_component = 0.0
+if intelligence_mode != "GDELT only" and manual_event != "No additional event":
+    manual_event_component = (manual_event_severity / 100) * 18 * manual_confidence_weight
 threat_component = threat_severity * 0.35
 verification_component = (
     (12 if verified_incident else 0)
@@ -329,6 +468,7 @@ raw_risk = (
     + headline_component
     + verification_component
     + shock_cfg["risk"]
+    + manual_event_component
 )
 
 risk_score = int(round(clamp(raw_risk, 0, 100)))
@@ -341,7 +481,17 @@ objective_evidence_count = sum([
     port_disruption,
     insurer_confirmation,
 ])
-confidence_score = int(clamp(confidence_numeric + objective_evidence_count * 4, 0, 95))
+confidence_adjustment = objective_evidence_count * 4
+
+if intelligence_mode != "Analyst only" and gdelt_state == "UNKNOWN":
+    confidence_adjustment -= 10
+elif gdelt_state == "LAST SUCCESS":
+    confidence_adjustment -= 4
+
+if intelligence_mode != "GDELT only" and manual_event != "No additional event":
+    confidence_adjustment += {"Low": 1, "Medium": 3, "High": 5}[manual_source_confidence]
+
+confidence_score = int(clamp(confidence_numeric + confidence_adjustment, 0, 95))
 
 adjusted_delay_days = max(
     1,
@@ -517,10 +667,23 @@ else:
     against_evidence.append("No insurer / broker confirmation selected")
     against_count += 1
 
-if headline_sentiment < -0.05:
-    for_evidence.append(f"Negative headline polarity ({headline_sentiment:.2f})")
-else:
-    against_evidence.append(f"Headline polarity is not materially negative ({headline_sentiment:.2f})")
+if headline_sentiment is not None:
+    if headline_sentiment < -0.05:
+        for_evidence.append(
+            f"{gdelt_state.title()} GDELT headline has negative polarity ({headline_sentiment:.2f})"
+        )
+    else:
+        against_evidence.append(
+            f"{gdelt_state.title()} GDELT headline is not materially negative ({headline_sentiment:.2f})"
+        )
+elif intelligence_mode != "Analyst only":
+    against_evidence.append("GDELT status is UNKNOWN; absence of data is not treated as neutral evidence")
+
+if intelligence_mode != "GDELT only" and manual_event != "No additional event":
+    for_evidence.append(
+        f"Analyst-entered event: {manual_event} | severity {manual_event_severity}/100 | "
+        f"source confidence {manual_source_confidence}"
+    )
 
 if shock != "None":
     for_evidence.append(f"Scenario stressor applied: {shock}")
@@ -559,18 +722,67 @@ st.header("🌐 Open-Source Intelligence Inputs")
 os1, os2 = st.columns([2, 1])
 
 with os1:
-    st.markdown("#### Latest matching GDELT headline")
-    st.write(f"**{headline}**")
-    st.link_button("Open source article", source_url)
-    st.caption(f"Headline polarity: {headline_sentiment:.2f}")
-    if gdelt_error:
-        st.warning(gdelt_error)
+    st.markdown("#### GDELT intelligence feed")
+
+    state_icon = {
+        "LIVE": "🟢",
+        "LAST SUCCESS": "🟠",
+        "UNKNOWN": "⚪",
+        "DISABLED": "🔵",
+    }[gdelt_state]
+
+    st.markdown(f"**Source status:** {state_icon} {gdelt_state}")
+    st.caption(gdelt_age_note)
+
+    if headline:
+        st.write(f"**{headline}**")
+        if source_url:
+            st.link_button("Open source article", source_url)
+
+        if headline_sentiment is not None:
+            st.caption(
+                f"Headline polarity: {headline_sentiment:.2f} | "
+                f"Risk-engine weight: {'full' if gdelt_state == 'LIVE' else 'reduced'}"
+            )
+    else:
+        st.info(
+            "No GDELT evidence is currently being scored. "
+            "CORA treats this state as **UNKNOWN**, not as neutral or safe."
+        )
+
+    if intelligence_mode != "GDELT only":
+        st.markdown("#### Analyst intelligence")
+        if manual_event == "No additional event":
+            st.caption("No additional analyst-entered event is active.")
+        else:
+            st.write(
+                f"**{manual_event}** — severity **{manual_event_severity}/100**, "
+                f"source confidence **{manual_source_confidence}**"
+            )
+            if manual_note:
+                st.caption(f"Analyst note: {manual_note}")
+
+    with st.expander("GDELT technical diagnostics"):
+        st.write(f"Configured mode: **{intelligence_mode}**")
+        st.write(f"Current state: **{gdelt_state}**")
+        if gdelt_result["ok"]:
+            st.success(
+                f"Live GDELT query succeeded using window {gdelt_result['window']}."
+            )
+            st.caption(f"Query used: {gdelt_result['query_used']}")
+        else:
+            st.warning(
+                "Live retrieval did not succeed. CORA continues operating without "
+                "treating missing data as a neutral signal."
+            )
+            if gdelt_error:
+                st.code(gdelt_error)
 
 with os2:
     st.markdown("#### Spatial reference")
     st.metric("Geographic baseline", spatial_metric)
     st.caption(cfg["spatial_description"])
-    st.markdown(f"**Source status:** 🔵 STATIC REFERENCE")
+    st.markdown("**Source status:** 🔵 STATIC REFERENCE")
     st.caption(cfg["spatial_source"])
 
     with st.expander("Optional Wolfram validation"):
@@ -587,8 +799,9 @@ with os2:
                 st.caption(f"Technical detail: {wolfram_error}")
 
 st.caption(
-    "GDELT is a time-varying OSINT input. Geographic dimensions are stable reference data. "
-    "Wolfram is optional validation only and does not determine the CORA risk score."
+    "CORA separates source availability from source meaning. A failed GDELT request "
+    "does not imply a neutral security environment. Geographic dimensions remain "
+    "stable reference data; Wolfram is optional validation only."
 )
 
 st.divider()
@@ -705,6 +918,11 @@ audit_df = pd.DataFrame({
         "Insurance premium assumption",
         "Scenario shock",
         "Analyst confidence",
+        "Intelligence mode",
+        "GDELT state",
+        "Analyst-entered event",
+        "Manual event severity",
+        "Manual source confidence",
         "Calculated risk score",
         "Recommended action",
     ],
@@ -719,6 +937,11 @@ audit_df = pd.DataFrame({
         f"{assumed_premium_rate:.1%}",
         shock,
         analyst_confidence,
+        intelligence_mode,
+        gdelt_state,
+        manual_event,
+        f"{manual_event_severity}/100" if manual_event != "No additional event" else "N/A",
+        manual_source_confidence if manual_event != "No additional event" else "N/A",
         f"{risk_score}/100 ({band})",
         recommended_action,
     ],
@@ -765,5 +988,5 @@ with st.expander("ℹ️ Methodology, limitations and responsible use"):
 st.caption(
     f"Developed by Mohd Khairul Ridhuan bin Mohd Fadzil © 2026 | "
     f"Last session render: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} | "
-    "Project CORA V2 — research decision-support prototype."
+    "Project CORA V2.2 — research decision-support prototype."
 )
