@@ -6,11 +6,11 @@ import pydeck as pdk
 from datetime import datetime, timezone
 
 # ==============================================================================
-# PROJECT CORA V2.2 — Maritime Crisis Decision Simulator
+# PROJECT CORA V3 — Interactive Maritime Intelligence & Decision Simulator
 # ============================================================================
 
 st.set_page_config(
-    page_title="Project CORA | Maritime Crisis Decision Simulator",
+    page_title="Project CORA V3 | Interactive Maritime Intelligence Simulator",
     page_icon="🚢",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -228,9 +228,9 @@ def confidence_band(score):
 # ==============================================================================
 
 st.title("🚢 Project CORA")
-st.subheader("Maritime Crisis Decision Simulator")
+st.subheader("Interactive Maritime Intelligence & Decision Simulator")
 st.caption(
-    "A transparent OSINT-enabled decision-support prototype for comparing maritime crisis responses."
+    "An interactive OSINT-enabled prototype for building, challenging, comparing and recording maritime crisis decisions."
 )
 st.markdown("**Principal Investigator:** Mohd Khairul Ridhuan bin Mohd Fadzil")
 st.divider()
@@ -242,6 +242,12 @@ st.divider()
 
 with st.sidebar:
     st.header("🎛️ CORA Control Room")
+
+    scenario_name = st.text_input(
+        "Scenario name",
+        value="Maritime Crisis Scenario",
+        help="Give the current simulation a name before saving it to Decision History.",
+    )
 
     current_node = st.selectbox(
         "Maritime chokepoint",
@@ -304,6 +310,41 @@ with st.sidebar:
         options=["Low", "Medium", "High"],
         value="Medium",
     )
+
+    risk_appetite = st.select_slider(
+        "Management risk appetite",
+        options=["Conservative", "Balanced", "Aggressive"],
+        value="Balanced",
+        help="Changes how strongly CORA penalizes residual risk when ranking decisions.",
+    )
+
+    st.markdown("### Decision priorities")
+    cost_priority = st.slider(
+        "Cost priority",
+        min_value=0,
+        max_value=100,
+        value=40,
+        help="Relative importance of estimated financial cost.",
+    )
+    risk_priority = st.slider(
+        "Risk priority",
+        min_value=0,
+        max_value=100,
+        value=45,
+        help="Relative importance of residual risk.",
+    )
+    delay_priority = st.slider(
+        "Delay priority",
+        min_value=0,
+        max_value=100,
+        value=15,
+        help="Relative importance of time delay.",
+    )
+
+    priority_sum = max(cost_priority + risk_priority + delay_priority, 1)
+    cost_weight = cost_priority / priority_sum
+    risk_weight = risk_priority / priority_sum
+    delay_weight = delay_priority / priority_sum
 
     shock = st.selectbox("Scenario shock", list(SHOCKS.keys()))
     shock_cfg = SHOCKS[shock]
@@ -536,12 +577,30 @@ scenario_df = pd.DataFrame({
 })
 scenario_df["Risk Band"] = scenario_df["Residual Risk Score"].apply(risk_band)
 
-# Weighted decision score: lower is better
-scenario_df["Decision Score"] = (
-    (scenario_df["Estimated Cost (USD)"] / max(scenario_df["Estimated Cost (USD)"].max(), 1)) * 45
-    + (scenario_df["Residual Risk Score"] / 100) * 45
-    + (scenario_df["Indicative Delay (days)"] / max(scenario_df["Indicative Delay (days)"].max(), 1)) * 10
+# User-adjustable decision score: lower is better.
+# Management risk appetite changes the penalty applied to residual risk.
+appetite_multiplier = {
+    "Conservative": 1.25,
+    "Balanced": 1.00,
+    "Aggressive": 0.78,
+}[risk_appetite]
+
+normalized_cost = (
+    scenario_df["Estimated Cost (USD)"]
+    / max(scenario_df["Estimated Cost (USD)"].max(), 1)
 )
+normalized_risk = scenario_df["Residual Risk Score"] / 100
+normalized_delay = (
+    scenario_df["Indicative Delay (days)"]
+    / max(scenario_df["Indicative Delay (days)"].max(), 1)
+)
+
+scenario_df["Decision Score"] = (
+    normalized_cost * cost_weight
+    + normalized_risk * risk_weight * appetite_multiplier
+    + normalized_delay * delay_weight
+) * 100
+
 recommended_row = scenario_df.loc[scenario_df["Decision Score"].idxmin()]
 recommended_action = recommended_row["Decision"]
 
@@ -583,14 +642,20 @@ st.divider()
 
 
 # ==============================================================================
-# 8. DECISION COMPARISON
+# 8. INTERACTIVE DECISION SIMULATOR
 # ==============================================================================
 
-st.header("🧭 A/B/C Decision Comparison")
+st.header("🧭 Interactive Decision Simulator")
 st.caption(
-    "Change any sidebar assumption and the three management options recalculate immediately. "
-    "The recommendation is a transparent prototype heuristic, not operational advice."
+    "Change any Control Room assumption and all management options recalculate immediately. "
+    "You can also select your own decision and compare it with CORA's recommendation."
 )
+
+priority_cols = st.columns(4)
+priority_cols[0].metric("Cost weight", f"{cost_weight:.0%}")
+priority_cols[1].metric("Risk weight", f"{risk_weight:.0%}")
+priority_cols[2].metric("Delay weight", f"{delay_weight:.0%}")
+priority_cols[3].metric("Risk appetite", risk_appetite)
 
 show_df = scenario_df[[
     "Decision",
@@ -598,8 +663,11 @@ show_df = scenario_df[[
     "Indicative Delay (days)",
     "Residual Risk Score",
     "Risk Band",
+    "Decision Score",
 ]].copy()
+
 show_df["Estimated Cost (USD)"] = show_df["Estimated Cost (USD)"].round(0).astype(int)
+show_df["Decision Score"] = show_df["Decision Score"].round(1)
 
 st.dataframe(
     show_df,
@@ -608,6 +676,7 @@ st.dataframe(
     column_config={
         "Estimated Cost (USD)": st.column_config.NumberColumn(format="USD %,.0f"),
         "Residual Risk Score": st.column_config.ProgressColumn(min_value=0, max_value=100),
+        "Decision Score": st.column_config.NumberColumn(format="%.1f"),
     },
 )
 
@@ -618,11 +687,140 @@ for col, (_, row) in zip([c1, c2, c3], scenario_df.iterrows()):
         st.metric("Estimated cost", money(row["Estimated Cost (USD)"]))
         st.metric("Residual risk", f"{int(row['Residual Risk Score'])}/100", row["Risk Band"])
         st.metric("Delay", f"{int(row['Indicative Delay (days)'])} day(s)")
+        st.caption(f"Decision score: {row['Decision Score']:.1f}")
 
 st.info(
-    f"**Prototype recommendation:** {recommended_action}. "
-    "This option currently has the lowest combined cost–risk–delay decision score under your assumptions."
+    f"**CORA recommendation:** {recommended_action}. "
+    "It currently has the lowest weighted cost–risk–delay score under your selected priorities and risk appetite."
 )
+
+st.markdown("### 👤 Management decision")
+user_decision = st.radio(
+    "Which action would you choose?",
+    scenario_df["Decision"].tolist(),
+    horizontal=True,
+    index=scenario_df["Decision"].tolist().index(recommended_action),
+)
+
+user_row = scenario_df.loc[scenario_df["Decision"] == user_decision].iloc[0]
+rec_row = scenario_df.loc[scenario_df["Decision"] == recommended_action].iloc[0]
+
+decision_match = user_decision == recommended_action
+
+if decision_match:
+    st.success("Your selected action currently matches CORA's recommended option.")
+else:
+    cost_delta = user_row["Estimated Cost (USD)"] - rec_row["Estimated Cost (USD)"]
+    risk_delta = int(user_row["Residual Risk Score"] - rec_row["Residual Risk Score"])
+    delay_delta = int(user_row["Indicative Delay (days)"] - rec_row["Indicative Delay (days)"])
+
+    st.warning(
+        f"Your decision differs from CORA. Compared with **{recommended_action}**, "
+        f"your choice changes estimated cost by **{money(cost_delta)}**, "
+        f"residual risk by **{risk_delta:+d} points**, and delay by **{delay_delta:+d} day(s)**."
+    )
+
+# ------------------------------------------------------------------
+# Stress-test laboratory
+# ------------------------------------------------------------------
+st.markdown("### 🧪 Stress-Test Laboratory")
+st.caption(
+    "Test how sensitive the current decision is to different threat conditions without changing the saved Control Room inputs."
+)
+
+stress_options = {
+    "Current assumptions": 0,
+    "Threat +15": 15,
+    "Threat +30": 30,
+    "Threat -15": -15,
+}
+stress_choice = st.selectbox("Stress test", list(stress_options.keys()), index=0)
+stress_delta = stress_options[stress_choice]
+
+stress_risk = int(clamp(risk_score + stress_delta, 0, 100))
+
+stress_df = scenario_df[["Decision", "Estimated Cost (USD)", "Indicative Delay (days)"]].copy()
+stress_df["Stress Residual Risk"] = [
+    stress_risk,
+    int(clamp(stress_risk - 18, 0, 100)),
+    int(clamp(stress_risk - 30, 0, 100)),
+]
+stress_df["Stress Risk Band"] = stress_df["Stress Residual Risk"].apply(risk_band)
+
+stress_cost = stress_df["Estimated Cost (USD)"] / max(stress_df["Estimated Cost (USD)"].max(), 1)
+stress_risk_norm = stress_df["Stress Residual Risk"] / 100
+stress_delay = stress_df["Indicative Delay (days)"] / max(stress_df["Indicative Delay (days)"].max(), 1)
+
+stress_df["Stress Decision Score"] = (
+    stress_cost * cost_weight
+    + stress_risk_norm * risk_weight * appetite_multiplier
+    + stress_delay * delay_weight
+) * 100
+
+stress_recommendation = stress_df.loc[stress_df["Stress Decision Score"].idxmin(), "Decision"]
+
+s1, s2, s3 = st.columns(3)
+s1.metric("Stress-test risk", f"{stress_risk}/100", risk_band(stress_risk))
+s2.metric("Current recommendation", recommended_action)
+s3.metric("Stress recommendation", stress_recommendation)
+
+if stress_recommendation != recommended_action:
+    st.warning(
+        f"⚠️ Recommendation changes from **{recommended_action}** to "
+        f"**{stress_recommendation}** under `{stress_choice}`."
+    )
+else:
+    st.success(
+        f"Recommendation remains **{recommended_action}** under `{stress_choice}`."
+    )
+
+# ------------------------------------------------------------------
+# Save decision to session history
+# ------------------------------------------------------------------
+if "decision_history" not in st.session_state:
+    st.session_state.decision_history = []
+
+save_col, clear_col = st.columns([1, 1])
+
+with save_col:
+    if st.button("💾 Save current scenario to Decision History", use_container_width=True):
+        st.session_state.decision_history.append(
+            {
+                "Timestamp UTC": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                "Scenario": scenario_name,
+                "Node": current_node,
+                "Risk Score": risk_score,
+                "Risk Band": band,
+                "Confidence": confidence_score,
+                "Shock": shock,
+                "Management Choice": user_decision,
+                "CORA Recommendation": recommended_action,
+                "Selected Cost USD": round(float(user_row["Estimated Cost (USD)"]), 2),
+                "Selected Residual Risk": int(user_row["Residual Risk Score"]),
+                "Selected Delay Days": int(user_row["Indicative Delay (days)"]),
+                "Risk Appetite": risk_appetite,
+            }
+        )
+        st.success("Scenario saved to this session's Decision History.")
+
+with clear_col:
+    if st.button("🗑️ Clear Decision History", use_container_width=True):
+        st.session_state.decision_history = []
+        st.success("Decision History cleared.")
+
+if st.session_state.decision_history:
+    history_df = pd.DataFrame(st.session_state.decision_history)
+    st.markdown("### 🕘 Decision History")
+    st.dataframe(history_df, hide_index=True, use_container_width=True)
+
+    st.download_button(
+        "⬇ Download Decision History (CSV)",
+        data=history_df.to_csv(index=False).encode("utf-8"),
+        file_name="cora_decision_history.csv",
+        mime="text/csv",
+    )
+else:
+    st.caption("No scenarios have been saved during this session yet.")
 
 st.divider()
 
@@ -710,6 +908,101 @@ st.caption(
     "Confidence reflects user-selected analyst confidence plus the number of corroborating evidence controls. "
     "It is not a calibrated statistical probability."
 )
+
+
+st.markdown("### 💬 Ask CORA")
+question = st.selectbox(
+    "Ask a decision question",
+    [
+        "Why is CORA recommending this option?",
+        "What could make this assessment wrong?",
+        "What evidence would change the recommendation?",
+        "What is the biggest financial exposure?",
+        "What is the weakest part of the intelligence?",
+    ],
+)
+
+if question == "Why is CORA recommending this option?":
+    st.write(
+        f"CORA recommends **{recommended_action}** because it has the lowest weighted "
+        f"decision score under your current priorities: cost {cost_weight:.0%}, "
+        f"risk {risk_weight:.0%}, delay {delay_weight:.0%}, with a "
+        f"**{risk_appetite.lower()}** management risk appetite."
+    )
+    st.write(
+        f"The option's residual risk is **{int(rec_row['Residual Risk Score'])}/100**, "
+        f"estimated cost is **{money(rec_row['Estimated Cost (USD)'])}**, and "
+        f"indicative delay is **{int(rec_row['Indicative Delay (days)'])} day(s)**."
+    )
+
+elif question == "What could make this assessment wrong?":
+    weaknesses = []
+    if gdelt_state in ["UNKNOWN", "LAST SUCCESS", "DISABLED"]:
+        weaknesses.append(f"GDELT evidence is currently {gdelt_state.lower()}.")
+    if not verified_incident:
+        weaknesses.append("No verified security incident has been selected.")
+    if not navigation_disruption:
+        weaknesses.append("No navigation/AIS anomaly has been selected.")
+    if not port_disruption:
+        weaknesses.append("No port/channel disruption has been selected.")
+    if not insurer_confirmation:
+        weaknesses.append("No insurer/broker confirmation has been selected.")
+    if manual_event != "No additional event" and manual_source_confidence == "Low":
+        weaknesses.append("The analyst-entered event has low source confidence.")
+    if not weaknesses:
+        weaknesses.append(
+            "The main remaining weakness is that CORA is still a heuristic prototype rather than a calibrated predictive model."
+        )
+    for w in weaknesses:
+        st.write(f"• {w}")
+
+elif question == "What evidence would change the recommendation?":
+    st.write(
+        "The recommendation is most likely to change if one or more of these variables move materially:"
+    )
+    st.write("• verified incident status or port/navigation disruption")
+    st.write("• threat severity")
+    st.write("• expected disruption days")
+    st.write("• insurance premium assumption")
+    st.write("• management cost/risk/delay priorities")
+    st.write("• management risk appetite")
+    st.write(
+        f"Current stress-test result: **{stress_recommendation}** under `{stress_choice}`."
+    )
+
+elif question == "What is the biggest financial exposure?":
+    exposures = {
+        "Fleet / vessel value": float(asset_exposure),
+        "Cargo value": float(cargo_value),
+        "Base delay exposure": float(base_delay_exposure),
+        "Scenario premium": float(premium_cost),
+    }
+    biggest_name = max(exposures, key=exposures.get)
+    st.write(
+        f"The largest direct exposure currently entered is **{biggest_name}** at "
+        f"**{money(exposures[biggest_name])}**."
+    )
+    st.caption(
+        "This is a direct comparison of configured scenario values, not an expected-loss calculation."
+    )
+
+else:
+    if gdelt_state == "UNKNOWN":
+        st.write(
+            "**Weakest intelligence element:** live external corroboration. "
+            "GDELT is currently UNKNOWN, so CORA is relying more heavily on analyst inputs and selected evidence controls."
+        )
+    elif objective_evidence_count == 0:
+        st.write(
+            "**Weakest intelligence element:** corroboration. No independent evidence control "
+            "has been selected beyond the headline/manual scenario inputs."
+        )
+    else:
+        st.write(
+            f"The current analytical confidence is **{confidence_score}% ({confidence_band(confidence_score)})**. "
+            "Review the Evidence limiting the assessment panel above for the weakest assumptions."
+        )
+
 
 st.divider()
 
@@ -918,6 +1211,11 @@ audit_df = pd.DataFrame({
         "Insurance premium assumption",
         "Scenario shock",
         "Analyst confidence",
+        "Management risk appetite",
+        "Cost priority",
+        "Risk priority",
+        "Delay priority",
+        "Management selected decision",
         "Intelligence mode",
         "GDELT state",
         "Analyst-entered event",
@@ -937,6 +1235,11 @@ audit_df = pd.DataFrame({
         f"{assumed_premium_rate:.1%}",
         shock,
         analyst_confidence,
+        risk_appetite,
+        f"{cost_weight:.0%}",
+        f"{risk_weight:.0%}",
+        f"{delay_weight:.0%}",
+        user_decision,
         intelligence_mode,
         gdelt_state,
         manual_event,
@@ -971,6 +1274,8 @@ with st.expander("ℹ️ Methodology, limitations and responsible use"):
         - combines configurable business exposure with open-source signals;
         - applies transparent scenario heuristics;
         - compares three decision options: continue, hold, reroute;
+        - allows user-selected risk appetite and decision priorities;
+        - records session-based Decision History and stress-test results;
         - exposes evidence, assumptions and confidence rather than hiding them.
 
         **What CORA does not do**
@@ -988,5 +1293,5 @@ with st.expander("ℹ️ Methodology, limitations and responsible use"):
 st.caption(
     f"Developed by Mohd Khairul Ridhuan bin Mohd Fadzil © 2026 | "
     f"Last session render: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} | "
-    "Project CORA V2.2 — research decision-support prototype."
+    "Project CORA V3 — interactive research decision-support prototype."
 )
