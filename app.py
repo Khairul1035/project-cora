@@ -1,6 +1,4 @@
-from pathlib import Path
-
-code = r'''import streamlit as st
+import streamlit as st
 import requests
 from textblob import TextBlob
 import pandas as pd
@@ -549,23 +547,3 @@ st.caption(
     "Project CORA is a research/portfolio decision-support prototype. "
     "Outputs are not operational, legal, insurance, or investment advice."
 )
-'''
-
-path = Path("/mnt/data/project_cora_fixed.py")
-path.write_text(code, encoding="utf-8")
-
-# Syntax check without importing external dependencies.
-import py_compile
-py_compile.compile(str(path), doraise=True)
-
-req = """streamlit
-requests
-textblob
-pandas
-pydeck
-"""
-Path("/mnt/data/requirements.txt").write_text(req, encoding="utf-8")
-
-print("Created:", path)
-print("Syntax check: PASSED")
-print("Lines:", len(code.splitlines()))
