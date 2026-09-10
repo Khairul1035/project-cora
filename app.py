@@ -1,4 +1,4 @@
-pythonimport streamlit as st
+import streamlit as st
 import requests
 from textblob import TextBlob
 import urllib.parse
@@ -195,3 +195,4 @@ with col_c_left:
 
 with col_c_right:
     st.write("#### 📈 Statistical Metric Index Chart:")
+    st.bar_chart(data=chart_data, x='Hypothesis Framework', y='Inconsistency Score Index', use_container_width=True)st.divider()==============================================================================7. CLIENT INTERVENTION FRAMEWORK: PRESCRIPTIVE MANDATES==============================================================================st.header("⚡ Prescriptive Action Playbook")if h3_inconsistency > 4:st.error(f"🚨 CRITICAL RISK THRESHOLD VIOLATION DETECTED AT {current_node.upper()}")st.write("### ⏱️ ... 15-Minute Tactical Protocol Intercept ...")col_p1, col_p2 = st.columns(2)with col_p1:st.markdown(f"""#### 🗺️ 1. Asset Diversion Mandate* Command: Immediately halt further asset deployments into active vector coordinates.* Rerouting Vector: Execute alternate contingency routing protocol mapped outside the active spatial envelope.* Operational Impact: Increases transit time by {base_multiplier:.1f} days, but completely mitigates a USD ${asset_exposure:,.2f} seizure or digital destruction event.""")with col_p2:st.markdown("""#### 🛡️ 2. Dynamic Premium Underwriting Hedging* Financial Mandate: Lock in current war-risk pricing parameters immediately before standard maritime insurance indexes retroactively recalculate and inflate premiums by +25%.* Legal Countermeasure: Ingest this system's automated audit trail dataframe as empirical evidence of proactive due diligence to prevent asset negligence liability claims.""")else:st.success(f"✅ OPERATIONAL CLEARANCE: All telemetry variables for {current_node} are operating within standard deviations. Fleet vectors are cleared for transit under baseline operating budgets. No tactical deviations required.")st.divider()st.caption(f"Developed by Mohd Khairul Ridhuan bin Mohd Fadzil © 2026. Document Classification: RESTRICTED ENTERPRISE.")
