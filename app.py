@@ -161,12 +161,12 @@ view_state = pdk.ViewState(latitude=node_lat, longitude=node_lon, zoom=4, pitch=
 
 arc_layer = pdk.Layer(
     "ArcLayer", data=map_data, get_source_position="[from_lon, from_lat]", get_target_position="[to_lon, to_lat]",
-    get_source_color=[0, 255, 100, 200], get_target_color=[255, 0, 50, 200], get_width=5
+    get_source_color=[0, 255, 0, 150], get_target_color=[255, 0, 0, 150], get_width=5
 )
 
 column_layer = pdk.Layer(
     "ColumnLayer", data=map_data, get_position="[to_lon, to_lat]", get_elevation="threat_level",
-    elevation_scale=1, radius=50000, get_fill_color=[255, 0, 50, 150], pickable=True, auto_highlight=True
+    elevation_scale=1, radius=50000, get_fill_color=[255, 0, 0, 200], pickable=True, auto_highlight=True
 )
 
 st.pydeck_chart(pdk.Deck(
@@ -186,7 +186,7 @@ chart_data = pd.DataFrame({
     'Inconsistency Score Index': [h1_inconsistency, h2_inconsistency, h3_inconsistency]
 })
 
-col_c_left, col_c_right = st.columns()
+col_c_left, col_c_right = st.columns(2)
 
 with col_c_left:
     st.write("#### Numerical Assessment Audit Trail:")
@@ -195,4 +195,3 @@ with col_c_left:
 
 with col_c_right:
     st.write("#### 📈 Statistical Metric Index Chart:")
-    st.bar_chart(data=chart_data, x='Hypothesis Framework', y='Inconsistency Score Index', use_container_width=True)st.divider()==============================================================================7. CLIENT INTERVENTION FRAMEWORK: PRESCRIPTIVE MANDATES==============================================================================st.header("⚡ Prescriptive Action Playbook")if h3_inconsistency > 4:st.error(f"🚨 CRITICAL RISK THRESHOLD VIOLATION DETECTED AT {current_node.upper()}")st.write("### ⏱️ ... 15-Minute Tactical Protocol Intercept ...")col_p1, col_p2 = st.columns(2)with col_p1:st.markdown(f"""#### 🗺️ 1. Asset Diversion Mandate* Command: Immediately halt further asset deployments into active vector coordinates.* Rerouting Vector: Execute alternate contingency routing protocol mapped outside the active spatial envelope.* Operational Impact: Increases transit time by {base_multiplier:.1f} days, but completely mitigates a USD ${asset_exposure:,.2f} seizure or digital destruction event.""")with col_p2:st.markdown("""#### 🛡️ 2. Dynamic Premium Underwriting Hedging* Financial Mandate: Lock in current war-risk pricing parameters immediately before standard maritime insurance indexes retroactively recalculate and inflate premiums by +25%.* Legal Countermeasure: Ingest this system's automated audit trail dataframe as empirical evidence of proactive due diligence to prevent asset negligence liability claims.""")else:st.success(f"✅ OPERATIONAL CLEARANCE: All telemetry variables for {current_node} are operating within standard deviations. Fleet vectors are cleared for transit under baseline operating budgets. No tactical deviations required.")st.divider()st.caption(f"Developed by Mohd Khairul Ridhuan bin Mohd Fadzil © 2026. Document Classification: RESTRICTED ENTERPRISE.")
