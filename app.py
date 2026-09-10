@@ -42,7 +42,10 @@ st.markdown(
 NODE_CONFIG = {
     "Red Sea / Bab al-Mandab": {
         "gdelt_keyword": '"Bab al-Mandab" (attack OR crisis OR shipping OR vessel OR missile)',
-        "wolfram_query": "distance from Suez Canal to Bab el Mandeb",
+        "wolfram_query": "distance Suez Canal Bab el Mandeb",
+        "spatial_reference": "≈ 2,210 km",
+        "spatial_description": "Approximate Suez Canal–Bab al-Mandab route baseline",
+        "spatial_source": "Verified geographic baseline",
         "baseline_risk": 55,
         "default_delay_days": 5,
         "default_asset": 15_000_000,
@@ -51,11 +54,13 @@ NODE_CONFIG = {
         "node_lon": 43.3333,
         "origin_lat": 29.9667,
         "origin_lon": 32.5500,
-        "cached_spatial_metric": "≈ 2,210 km (cached baseline)",
     },
     "Strait of Hormuz": {
         "gdelt_keyword": '"Strait of Hormuz" (military OR tanker OR shipping OR attack OR seizure)',
-        "wolfram_query": "width of Strait of Hormuz",
+        "wolfram_query": "Strait of Hormuz width",
+        "spatial_reference": "≈ 39 km",
+        "spatial_description": "Approximate width of the Strait of Hormuz at its narrowest area",
+        "spatial_source": "Verified geographic baseline",
         "baseline_risk": 45,
         "default_delay_days": 4,
         "default_asset": 22_000_000,
@@ -64,11 +69,13 @@ NODE_CONFIG = {
         "node_lon": 56.2500,
         "origin_lat": 25.0109,
         "origin_lon": 55.0617,
-        "cached_spatial_metric": "≈ 39 km (cached baseline)",
     },
     "Malacca Strait": {
         "gdelt_keyword": '"Strait of Malacca" (piracy OR shipping OR vessel OR disruption OR collision)',
-        "wolfram_query": "length of Strait of Malacca",
+        "wolfram_query": "Strait of Malacca length",
+        "spatial_reference": "≈ 800 km",
+        "spatial_description": "Approximate length of the Strait of Malacca",
+        "spatial_source": "Verified geographic baseline",
         "baseline_risk": 25,
         "default_delay_days": 2,
         "default_asset": 8_000_000,
@@ -77,7 +84,6 @@ NODE_CONFIG = {
         "node_lon": 99.0000,
         "origin_lat": 1.2644,
         "origin_lon": 103.8400,
-        "cached_spatial_metric": "≈ 800 km (cached baseline)",
     },
 }
 
@@ -111,7 +117,7 @@ def fetch_gdelt_latest(keyword: str):
         "timespan": "15min",
         "sort": "datedesc",
     }
-    headers = {"User-Agent": "Project-CORA/2.0 research prototype"}
+    headers = {"User-Agent": "Project-CORA/2.1 research prototype"}
 
     try:
         response = requests.get(url, params=params, headers=headers, timeout=REQUEST_TIMEOUT)
@@ -290,8 +296,18 @@ except Exception:
 
 headline, source_url, gdelt_error = fetch_gdelt_latest(cfg["gdelt_keyword"])
 headline_sentiment = polarity(headline)
+
+# Geography is treated as a stable reference, not as a live dependency.
+# Wolfram is optional enrichment/validation only.
+spatial_metric = cfg["spatial_reference"]
 spatial_answer, wolfram_error = fetch_wolfram(cfg["wolfram_query"], WOLFRAM_APP_ID)
-spatial_metric = spatial_answer or cfg["cached_spatial_metric"]
+
+if spatial_answer:
+    wolfram_status = "LIVE VALIDATION AVAILABLE"
+    wolfram_status_icon = "🟢"
+else:
+    wolfram_status = "OPTIONAL VALIDATION UNAVAILABLE"
+    wolfram_status_icon = "⚪"
 
 # ==============================================================================
 # 6. RISK ENGINE
@@ -552,13 +568,27 @@ with os1:
 
 with os2:
     st.markdown("#### Spatial reference")
-    st.write(f"**{spatial_metric}**")
-    st.caption(cfg["wolfram_query"])
-    if wolfram_error:
-        st.info("Using cached spatial baseline because live Wolfram data is unavailable.")
+    st.metric("Geographic baseline", spatial_metric)
+    st.caption(cfg["spatial_description"])
+    st.markdown(f"**Source status:** 🔵 STATIC REFERENCE")
+    st.caption(cfg["spatial_source"])
+
+    with st.expander("Optional Wolfram validation"):
+        st.write(f"{wolfram_status_icon} **{wolfram_status}**")
+        st.caption(f"Validation query: {cfg['wolfram_query']}")
+        if spatial_answer:
+            st.success(f"Wolfram response: {spatial_answer}")
+        else:
+            st.caption(
+                "The CORA risk engine does not depend on this lookup. "
+                "The verified static geographic baseline remains in use."
+            )
+            if wolfram_error:
+                st.caption(f"Technical detail: {wolfram_error}")
 
 st.caption(
-    "GDELT and Wolfram are supporting inputs only. Lack of an article or API response does not establish absence of risk."
+    "GDELT is a time-varying OSINT input. Geographic dimensions are stable reference data. "
+    "Wolfram is optional validation only and does not determine the CORA risk score."
 )
 
 st.divider()
